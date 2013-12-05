@@ -1,0 +1,12 @@
+*.gz
+tmp/*
+*.tmp
+/document.pdf
+/tmp
+report.pdf 
+*.thm
+*.aux
+*.log
+
+/report.out
+/report.toc
