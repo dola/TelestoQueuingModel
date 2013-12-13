@@ -126,8 +126,15 @@ ETH Z\"urich}
 
 
 \begin{abstract}
-	
+	This report summarizes the work of analytically modeling and evaluating
+	\telesto, the Distributed Message Passing System built by Simon Marti and
+	Dominic Langenegger during the first milestone of the course project of the
+    {\it Advanced Systems Lab} course 2013 at ETH Zurich. All relevant
+    information about the first milestone can be found in \cite{asl:telesto}.
 
+    Used concepts, mathematical formulas and theoretical aspects are heavily
+    based on \cite{jain2008art} and the lecture slides.
+    
 \end{abstract}
 
 \tableofcontents
@@ -136,19 +143,75 @@ ETH Z\"urich}
 
 % Start writing here
 \chapter{Introduction}
-	Based on \cite{asl:telesto}.
-	
-
-\chapter{Goals}
-    
-	
-\chapter{Architecture}
     
 
+\chapter{Analytical Queuing Model}
+    This chapter introduces the analytical queuing model built to model the
+    characteristics of \telesto. It also includes explanations about
+    simplifications and assumptions that were made.
 
-\chapter{Implementation}
+    We recall Table 5.3 in \cite{asl:telesto}, showing in which parts of the
+    system a request spends how much time:
+    
+    \begin{table}[hp]
+        \centering
+        \rowcolors{1}{Gray}{white}
+        \begin{tabular}{$l^c^r}
+            \rowcolor{DarkGray}
+            \rowstyle{\bfseries}
+            Phase & Time & Relative\\
+            \hline
+            Waiting for client & \SI{79}{\micro\second} & 0.82\%\\
+            Parsing request & \SI{14}{\micro\second} & 0.15\%\\    
+            Waiting for database & \SI{9,574}{\micro\second} & 98.80\%\\
+            Responding & \SI{22}{\micro\second} & 0.23\%\\       
+        \end{tabular}
+        \caption{Time spent on various tasks by middleware workers}
+        \label{tbl:benchmark}
+    \end{table}
+    
+    Based on this data we can safely say, that the time a request is handled by
+    the middleware is minimal in comparison to the time spent to actually handle
+    it on the database tier. thereforee, we can simplify the queuing model for
+    the middleware by reducing it to the database tier as seen in~\cref{fig:globalModel}.
+    
+    Notice, that this leads to a very simplified model with one queue per
+    middleware and one service per database connection, since we can remove the
+    service time of the middleware interaction before and after the database
+    interaction. The database queues then become redundant and we can directly
+    link the queues of the middleware to all database connection services.
+    
+    Due to the architecture of \telesto, the database connection pool and the
+    worker thread pool are two entirely separated parts and therefore each
+    request handled by any worker thread, can be handled by any database connection out
+    of the pool.
 
-\chapter{Evaluation and Analysis}
+    \begin{figure}[t]
+        \centering
+            \includegraphics[width=0.9\textwidth]{globalModel}
+            \caption{Simplified model of the closed queuing system for \telesto}
+            \label{fig:globalModel}
+    \end{figure}
+
+\section{Workload}
+    As seen in \cref{fig:globalModel}, we use a closed queuing network to model
+    \telesto.
+
+\section{Notation}
+
+\begin{description}
+\item[Arrival Process]
+
+\end{description}
+
+\section{Load-Dependent Service Centers}
+
+
+
+\chapter{Performance Analysis}
+
+
+\chapter{Comparison}
 
 
 \chapter{Conclusion}
