@@ -142,9 +142,6 @@ ETH Z\"urich}
 \mainmatter % do not remove this line
 
 % Start writing here
-\chapter{Introduction}
-    
-
 \chapter{Analytical Queuing Model}
     This chapter introduces the analytical queuing model built to model the
     characteristics of \telesto. It also includes explanations about
@@ -167,12 +164,12 @@ ETH Z\"urich}
             Responding & \SI{22}{\micro\second} & 0.23\%\\       
         \end{tabular}
         \caption{Time spent on various tasks by middleware workers}
-        \label{tbl:benchmark}
+        \label{tbl:time-middleware}
     \end{table}
     
     Based on this data we can safely say, that the time a request is handled by
     the middleware is minimal in comparison to the time spent to actually handle
-    it on the database tier. thereforee, we can simplify the queuing model for
+    it on the database tier. Therefore, we can simplify the queuing model for
     the middleware by reducing it to the database tier as seen in~\cref{fig:globalModel}.
     
     Notice, that this leads to a very simplified model with one queue per
@@ -193,29 +190,295 @@ ETH Z\"urich}
             \label{fig:globalModel}
     \end{figure}
 
-\section{Workload}
+\section{Workload \& Model}
     As seen in \cref{fig:globalModel}, we use a closed queuing network to model
-    \telesto.
+    \telesto. Since all conducted tests during milestone 1
+    (see~\cite{asl:telesto} for more details) operate with clients that only
+    send new requests as soon as a previous on is completed, the number of jobs
+    in the system at any time is directly corresponding to the number of clients
+    and therefore fixed.
+    
+    It is important to note, that some clients may query the middleware to
+    retrieve a message when actually no message is waiting for them. Based on
+    the experiments from milestone 1, we know that this is the case for roughly
+    one sixth of all message requests.
 
+\subsection{Clients}
+    Our queuing network does not include any modeling of the clients. This is
+    because the time a job actually spends at the client is minimal since a
+    client has only the following very simple tasks (that take almost no time):
+    
+    \begin{enumerate}[(a)]
+        \item Send a message to a middleware
+        \item Wait for a message
+        \item Receive the message
+        \item Start from (a); possibly using some information of the received
+        message
+    \end{enumerate}
+
+    The actual time a job is being processed at the client is in steps (c), (d)
+    and (a), which is comparable in workload to the tasks of the middleware for
+    message processing as seen in~\cref{tbl:benchmark}, excluding the part where
+    the middleware waits for the database. Since this takes very little time 
+    compared to the time spent processing a job at the database, it is save to 
+    simplify the model by omitting the clients entirely.
+    
+    However the think time of the network can be determined by including the
+    client retry delay of $100$ ms into the calculation. If we assume that (as
+    stated above) roughly one sixth of all client queries end up with no message
+    as a result (and therefore the clients waits those $100$ ms), we get a think
+    time $T$ of about $\frac{100ms}{6} \approx 17 ms$.
+
+\subsection{Network}
+    In \telesto each client request actually passes the network in four different 
+    phases:
+
+    \begin{enumerate}
+        \item Client $\rightarrow$ Middleware
+        \item Middleware $\rightarrow$ Database
+        \item Database $\rightarrow$ Middleware
+        \item Middleware $\rightarrow$ Client
+    \end{enumerate}
+
+    Since we cannot measure the time spent in the network for the connections to
+    the database individually, we don't model the network in between the
+    middleware and the database separately.
+
+    For the connection from the clients to the middlewares we can assume that
+    all messages have about the same size since all conducted tests use messages
+    that are never longer than about $10$ characters. This means, that we can
+    assume the network delay is constant for every phase and not load dependent.
+    Therefore it can simply be modeled as a delay center in the network model.
+
+\subsection{Middleware}
+    The middleware consists of a single dispatcher thread that handles all
+    incoming connections and puts incoming data into a queue. This can be
+    modeled as a simple fixed-capacity server.
+    
+    The many worker threads in a \telesto{} middleware instance, are modeled as
+    load-dependent servers that then pass the job into a queue to the database
+    connection pool. Since the thread pool scales up to the number of threads it
+    is trivial to see, that this is load-dependent because multiple jobs can be
+    processed in parallel.
+    
+    The response from the database is then again packed into a \telesto{}
+    network packet to be sent to the client. This again happens by the same
+    worker thread that handled the database call. Therefore this can also be
+    modeled load-dependent with the same properties as the parsing part of the
+    workers.
+    
+\subsection{Database}
+    Every worker thread in the middleware retrieves a database connection from
+    a theoretically independent database connection pool and uses it to execute
+    a query on the database. Each of these connections is modeled as a separate
+    load dependent server.
+    
+    Notice that the database itself may not scale very well with increasing
+    number of connections since its parallelism is very limited. However we
+    think that it is very hard to model this by directly relating e.g. the
+    number of cores of the machine to the number of service centers since the
+    database may very well scale to many more connections than cores for several
+    reasons like idle time and partial occupancy or internal parallelization
+    optimization.
+    
 \section{Notation}
 
-\begin{description}
-\item[Arrival Process]
+    This section provides a short overview of the used notation as seen in
+    \cite{jain2008art}.
 
-\end{description}
+    \begin{description}
+    \item[Arrival Process] \ \\ 
+      $\tau_i$ is the {\bf interarrival time} between two arrivals at $t_{i-1}$
+      and $t_{i}$.
+    \item[Service Time Distribution] \ \\
+      The distribution of time spent by a job in a specific service.
+    \item[Number of Servers] \ \\
+      The number of identical and independent servers for one particular service
+    \item[System Capacity] \ \\
+      The maximum number of jobs allowed in the system. This is usually always
+      $\infty$.
+    \item[Population Size] \ \\
+      The maximum number of potential jobs that can ever enter the system. This
+      is usually always $\infty$.
+    \item[Service Discipline] \ \\
+      The order jobs are served from a queue like {\it First In, First Out}
+      (FIFO), {\it Round Robin} (RR) or {\it Last In, First Out} (LIFO).
+    \end{description}
 
-\section{Load-Dependent Service Centers}
+\section{Parameters}
+    Every device and the whole system modeled in the analytical queuing network
+    for \telesto{} is specified by some parameters. These are (based
+    on~\cite{jain2008art}):
+    
+    \begin{description}
+        \item[Service Type $t$] \ \\
+            The type of the device. I.e. fixed capacity, delay center or load
+            dependent
+        \item[Service Time $s$] \ \\
+            The time needed to complete one job by a server
+        \item[Visits $v$] \ \\
+            The number of visits to a device
+        \item[Service Rate $\mu$] \ \\
+            The service rate of a device given the number of jobs in it.
+            This measure is used for load dependent servers only.
+        \item[Number of Clients $n$] \ \\
+            The number of clients in the system sending requests.
+        \item[Think Time $z$] \ \\
+            The additional delay between two requests. In \telesto{} a client
+            only waits for a certain {\it client retry delay} of usually $100
+            ms$ if a query for a message didn't return any message, which is
+            the case in roughly $25.8 \%$ of all queries as seen in
+            \cref{tbl:telesto-measures}.
+    \end{description}
 
 
+    To determine these values for all components of the network model, we used
+    the data from our benchmarks during milestone 1 as shown in
+    \cref{tbl:telesto-measures}.
 
-\chapter{Performance Analysis}
+
+    \begin{table}[ht]
+        \centering
+        
+        \begin{adjustbox}{center}
+            \rowcolors{1}{Gray}{white}
+            \begin{tabular}{$l|^c }
+                \rowcolor{DarkGray}
+                \rowstyle{\bfseries}
+                 Measure & Value \\
+                \hline
+                
+                Mean Packet Throughput  &   2498  $s^{-1}$  \\
+                Mean Message Throughput &   927   $s^{-1}$  \\
+                Mean Response Time      &   10.16 ms        \\
+                Mean Packets With Wait Time & $2498 - 2\cdot927 = 644 s^{-1}
+                \approx 25.8 \% $ \\
+                Mean Client Wait Time (Think time)   & $100 ms \cdot 25.8 \% =
+                25.8 ms$
+            \end{tabular}
+        \end{adjustbox}
+        \caption{Important measurement data of \telesto{}}
+        \label{tbl:telesto-measures}
+    \end{table}
+
+    \Cref{tbl:model-parameters} shows the values for each of these parameters.
 
 
-\chapter{Comparison}
+    \begin{table}[ht]
+        \centering
+        
+        \begin{adjustbox}{center}
+            \rowcolors{1}{Gray}{white}
+            \begin{tabular}{$l|^c^c^c^c^c }
+                \rowcolor{DarkGray}
+                \rowstyle{\bfseries}
+                 & Service Type $t$ & Service Time $s$ & Visits $v$ & Think Time
+                 $z$ \\
+                \hline
+                
+                Client      &                &        &       &  25.8ms     \\
+                Network     & Delay Center   & 1.30ms &   2   &             \\
+                Dispatcher  & Fixed Capacity & 0.01ms &   1   &             \\
+                Worker In   & Load-Dependent & 0.01ms &   1   &             \\
+                Worker Out  & Load-Dependent & 0.02ms &   1   &             \\
+                Database    & Load-Dependent & 8.01ms &   1   &             \\
+                
+            \end{tabular}
+        \end{adjustbox}
+        \caption{Parameter values for devices in the \telesto{} network model}
+        \label{tbl:model-parameters}
+    \end{table}
+
+\subsection{Service Rate $\mu$}
+The service rate has to be treated specially for the load dependent centers
+at the database and the middleware.
+
+\TODO{state clearly how they are modeled}
+\TODO{equation like:}
+\[ 
+\mu(n) = \left\{ 
+  \begin{array}{l l}
+    n/S         & \quad n < m       \\
+    m/S         & \quad n \geq m
+  \end{array} \right.
+\]
+
+\chapter{Analytical Analysis}
+Based on the parameters and model introduced in the previous chapter this
+chapter gives details about the executed performance analysis.
+
+\section{Algorithm}
+To perform the analysis of the whole closed queuing network of \telesto{} we use
+Mean-Value Analysis (MVA) as introduced in section $34.2$ of \cite{jain2008art}.
+Since we have multiple load-dependent centers within our model, we in particular
+use the {\it MVA Including Load-dependent Centers} algorithm from Box 36.1 in
+\cite{jain2008art}.
+
+\section{Queuing Network}
+
+    The following subsections show the results of our simulations in comparison
+    to some of the measurements and benchmarks we did on \telesto{} during
+    milestone 1.
+
+    \newpage
+
+\subsection{Combined Database Connection and Worker Thread count}
+   
+    \begin{figure}[th]
+        \centering
+            \includegraphics[width=0.9\textwidth]{graphs/db+worker}
+            \caption{Varying number of worker threads and database connections}
+            \label{fig:db+worker}
+    \end{figure}
+    
+    \Cref{fig:db+worker} shows the comparison of both the response time and the
+    throughput of the simulation and experiments varying the number of worker
+    threads and database connections simultaneously.
+    
+    \newpage
+    
+\subsection{Client Count}
+
+
+    \begin{figure}[th]
+        \centering
+            \includegraphics[width=0.9\textwidth]{graphs/client}
+            \caption{Varying client count}
+            \label{fig:clientCount}
+    \end{figure}
+    
+    In \cref{fig:clientCount} we plotted the response time and throughput for
+    \telesto{} when varying the number of clients and therefore jobs in the
+    network.
+    
+    \newpage
+    
+\subsection{Client Retry Delay}
+    
+    
+    \begin{figure}[th]
+        \centering
+            \includegraphics[width=0.9\textwidth]{graphs/client-delay}
+            \caption{Varying client retry delay (i.e. think time)}
+            \label{fig:retry-delay}
+    \end{figure}
+
+    Since the network think time is directly dependent on the client retry delay
+    in \telesto, we also simulated this experiment with our MVA model. The
+    results are shown in \cref{fig:retry-delay}.
+    
+    \newpage
+
+\section{Database}
+
+\section{Bottleneck}
+
 
 
 \chapter{Conclusion}
 	
+\section{Multiple Middlewares}
+\TODO{some text here to justify why this wasn't modeled and tested}
 
 % This displays the bibliography for all cited external documents. All references have to be defined in the file references.bib and can then be cited from within this document.
 \bibliographystyle{splncs}
