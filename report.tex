@@ -147,6 +147,8 @@ ETH Z\"urich}
     characteristics of \telesto. It also includes explanations about
     simplifications and assumptions that were made.
 
+    \TODO{rewrite whole part}
+
     We recall Table 5.3 in \cite{asl:telesto}, showing in which parts of the
     system a request spends how much time:
     
@@ -158,10 +160,10 @@ ETH Z\"urich}
             \rowstyle{\bfseries}
             Phase & Time & Relative\\
             \hline
-            Waiting for client & \SI{79}{\micro\second} & 0.82\%\\
-            Parsing request & \SI{14}{\micro\second} & 0.15\%\\    
-            Waiting for database & \SI{9,574}{\micro\second} & 98.80\%\\
-            Responding & \SI{22}{\micro\second} & 0.23\%\\       
+            Dispatching & \SI{12}{\micro\second} & 0.14\%\\
+            Parsing request & \SI{14}{\micro\second} & 0.17\%\\    
+            Waiting for database & \SI{8,059}{\micro\second} & 99.40\%\\
+            Responding & \SI{22}{\micro\second} & 0.27\%\\       
         \end{tabular}
         \caption{Time spent on various tasks by middleware workers}
         \label{tbl:time-middleware}
@@ -218,8 +220,8 @@ ETH Z\"urich}
 
     The actual time a job is being processed at the client is in steps (c), (d)
     and (a), which is comparable in workload to the tasks of the middleware for
-    message processing as seen in~\cref{tbl:benchmark}, excluding the part where
-    the middleware waits for the database. Since this takes very little time 
+    message processing as seen in~\cref{tbl:time-middleware}, excluding the part
+    where the middleware waits for the database. Since this takes very little time 
     compared to the time spent processing a job at the database, it is save to 
     simplify the model by omitting the clients entirely.
     
@@ -279,7 +281,32 @@ ETH Z\"urich}
     number of cores of the machine to the number of service centers since the
     database may very well scale to many more connections than cores for several
     reasons like idle time and partial occupancy or internal parallelization
-    optimization.
+    optimization. 
+    
+    We modeled some overhead ($10\%$) with high number of connections and capped
+    the parallelization effect at $25$ connections, the point where adding more
+    connections didn't improve throughput anymore during tests in milestone 1.
+    Because it is very hard to actually determine such effects in real systems,
+    these are values chosen by good faith in order to optimize the simulation
+    results in the right direction.
+    
+    The following formula was used to model the order of parallelism of the
+    database based on the number of database connections $c$:
+    
+    \[ 
+    \text{Order of Parallelism}(c) = \left\{ 
+      \begin{array}{l l}
+        c                   & \quad c \leq 15               \\
+        0.9 \cdot c         & \quad c > 15 \land c \leq 25   \\
+        0.9 \cdot 25        & \quad c > 25
+      \end{array} \right.
+    \]
+        
+    This formula is used to get the value for the order of parallelism in the
+    $\mu$ function for the service rate in the load dependent center for the
+    database.
+    For details about this service rate function are
+    listed in \cref{sec:service-rate}.
     
 \section{Notation}
 
@@ -329,6 +356,11 @@ ETH Z\"urich}
             ms$ if a query for a message didn't return any message, which is
             the case in roughly $25.8 \%$ of all queries as seen in
             \cref{tbl:telesto-measures}.
+            
+            \[
+                \text{Think Time } z := \text{Retry Delay} \cdot 25.8\%
+            \]
+            
     \end{description}
 
 
@@ -390,11 +422,15 @@ ETH Z\"urich}
     \end{table}
 
 \subsection{Service Rate $\mu$}
+\label{sec:service-rate}
 The service rate has to be treated specially for the load dependent centers
-at the database and the middleware.
+at the database and the middleware. For this we used the simple $\mu$ function
+introduced in the literature \cite{jain2008art} modeling a direct and
+overhead-less parallelization of multiple executions up to some order of maximum
+parallelism $m$. The following function directly calculates the service rate
+$\mu$ for some number of jobs $n$ in the load dependent center, an order of
+parallelism $m$ and a mean service time $S$.
 
-\TODO{state clearly how they are modeled}
-\TODO{equation like:}
 \[ 
 \mu(n) = \left\{ 
   \begin{array}{l l}
@@ -402,6 +438,15 @@ at the database and the middleware.
     m/S         & \quad n \geq m
   \end{array} \right.
 \]
+
+As mentioned above, we use a special values for the order of parallelism $m$ in
+the load-dependent center modeling the database in order to simulate
+parallelization overhead and a maximum order of parallelism.
+
+For the worker threads in \telesto{} we directly use the number of worker
+threads as order of parallelism since the high percentage of idle time makes
+parallelization have less overhead and the very low execution times anyway lead
+to low impact on the whole simulation.
 
 \chapter{Analytical Analysis}
 Based on the parameters and model introduced in the previous chapter this
@@ -414,11 +459,28 @@ Since we have multiple load-dependent centers within our model, we in particular
 use the {\it MVA Including Load-dependent Centers} algorithm from Box 36.1 in
 \cite{jain2008art}.
 
+For the implementation of the load dependent MVA algorithm, we used a small Java
+application that simulated the same datapoints we measured during various
+executions of the real \telesto{} system in milestone 1. Refer to
+\cref{tbl:model-parameters} for details about the used model parameters.
+
 \section{Queuing Network}
 
     The following subsections show the results of our simulations in comparison
     to some of the measurements and benchmarks we did on \telesto{} during
-    milestone 1.
+    milestone 1. The graphs were produced with {\tt
+    gnuplot}\websource{Gnuplot Website}{http://www.gnuplot.info/}{December 20,
+    2013} as those for milestone 1.
+    
+    For simplification and readability, we omitted the error bars of the
+    measurements. Please refer to \cite{asl:telesto} for further details about
+    the measuring methods and result data in milestone 1. The throughput is
+    always given in messages per second.
+    
+    Also the following sections only contain a analysis of the simulated results
+    in comparison to the measured values and a detailed discussion about why the
+    differences exist and how they might be reduced is given in
+    \cref{ch:conclusion}.
 
     \newpage
 
@@ -435,6 +497,18 @@ use the {\it MVA Including Load-dependent Centers} algorithm from Box 36.1 in
     throughput of the simulation and experiments varying the number of worker
     threads and database connections simultaneously.
     
+    We see that the simulation roughly fits the measurements of the real
+    \telesto{} system. The main differences are the extrema that are about $8
+    \%$ off for the throughput and nearly trippled for the response time. Also
+    they are reached at a later point than with the real world measurements.
+    Over all, all simulated values start at higher values for the response
+    time and lower values for the throughput but then follow approximately a
+    similar slope like the comparison data.
+    
+    An other minor difference is, that the throughput does not show a clear and
+    single maximum like in the measured values but stays constant after reaching
+    the maximum value of $2792$ packets per second.
+    
     \newpage
     
 \subsection{Client Count}
@@ -450,6 +524,15 @@ use the {\it MVA Including Load-dependent Centers} algorithm from Box 36.1 in
     In \cref{fig:clientCount} we plotted the response time and throughput for
     \telesto{} when varying the number of clients and therefore jobs in the
     network.
+    
+    We can again say, that the curves take approximately the same development.
+    The maximum of the throughput is about $9 \%$ off for the throughput while
+    the response time has a very similar slope but is constantly off by about
+    $20-25$ ms. Also we see, that the MVA model is limited in a way that it
+    cannot simulate the descending throughput after a certain amount of clients
+    are surpassed. (i.e. $100$ clients)
+    
+    Again the starting points 
     
     \newpage
     
@@ -469,13 +552,188 @@ use the {\it MVA Including Load-dependent Centers} algorithm from Box 36.1 in
     
     \newpage
 
-\section{Database}
+\subsection{Bottleneck}
+    For bottleneck analysis we use the calculated utilization values from our
+    MVA simulation. We used the standard configuration with $20$ worker threads
+    and database connections, and $90$ clients which is the best performing
+    configuration in our \telesto{} benchmarks in milestone 1.
+    \Cref{tbl:utilization} shows the calculated data where we can clearly
+    recognize that the database is as expected the bottleneck of the system.
+    
+     \begin{table}[ht]
+        \centering
+        
+        \begin{adjustbox}{center}
+            \rowcolors{1}{Gray}{white}
+            \begin{tabular}{$l|^c}
+                \rowcolor{DarkGray}
+                \rowstyle{\bfseries}
+                Center          & Utilitzation \\
+                \hline
+                
+                Dispatcher      & 2.7 \% \\
+                Middleware In   & 3.1 \% \\
+                Database        & 100 \% \\  
+                Middleware Out  & 4.8 \% \\
+            \end{tabular}
+        \end{adjustbox}
+        \caption{Utilization of the load centers in the MVA simulation}
+        \label{tbl:utilization}
+    \end{table}
+    
+    
+    
 
-\section{Bottleneck}
+\section{Database}
+    To get further information about how the database behaves during execution,
+    we use a M/M/m queue model as described in \cite{jain2008art} and feed it
+    with our measured values for the reference test of \telesto{} with $90$
+    clients and $25$ database connections.
+    
+    We will do such an analysis only for the database part of \telesto{} since
+    the middleware has such low utilization that it wouldn't really produce very
+    interesting results. Our assumptions are that the middleware would have a
+    very high probability for very low number of jobs in the queue, very low
+    traffic intensity and practically no waiting time.
+
+    In the following we state the formulas and calculations results directly as
+    listed in Box 31.2 in \cite{jain2008art}. The calculations were done
+    using a small python script that makes use of the {\tt
+    decimal}\websource{Python
+    Documentation:
+    decimal Package}{http://docs.python.org/2/library/decimal.html}{December 20,
+    2013} package in order to achieve very high precision with floating point numbers. A first try with a Java program using normal {\tt double}s yielded highly unstable results due to rounding errors and bad accuracy.
+
+    \begin{align*}
+        \text{Arrival rate}  & \qquad \lambda = 2498 \text{ jobs}\cdot s^{-1} \\
+        \text{Service rate}  & \qquad \mu = 124.1 \text{ jobs} \cdot s^{-1} \\
+        \text{Number of Servers}        & \qquad m       = 25   \\
+        \text{Number of Jobs / Clients} & \qquad n       = 90
+    \end{align*}
+
+    While the value for $\lambda$ was directly extracted from the throughput
+    measurements, $\mu$ was calculated using the mean service time for the
+    database as already used for the MVA network simulation. The necessary
+    calculations are shown below:
+
+    \begin{align*}
+        \mu = (0.008059s)^{-1} &= 124.1 \text{ jobs} \cdot s^{-1} \\
+    \end{align*}
+    
+    \begin{figure}[th]
+        \centering
+            \includegraphics[width=0.9\textwidth]{graphs/histogram}
+            \caption{Distribution of probabilities for a certian number of jobs
+            in the system}
+            \label{fig:jobs-in-queue-db}
+    \end{figure}
+    
+
+
+\begin{description}
+\item[Traffic Intensity:]
+    \[
+        \rho = \frac{\lambda}{m \cdot \lambda} = 0.805
+    \]
+
+\item[Probability of 0 jobs in Queue:]
+\[
+p_0 = \left[1 + \frac{(m*p)^m}{m! * (1-p)} + \sum_{n=1}^{m-1}
+\frac{(m*p)^n}{n!}\right]^{-1} = 1.690 * 10^{-9}
+\]
+
+\item[Probability of n jobs in Queue:]
+\[
+p_n = \left\{
+    \begin{array}{l l}
+    p_0 * \frac{(m*p)^n}{n!} & n < m\\
+    p_0 * \frac{p^n*m^m}{m!} & n \geq m
+    \end{array} 
+    \right.
+\]
+
+This formula yields \cref{fig:jobs-in-queue-db} which roughly fits a normal
+distribution with highest probability for $21$ jobs with a value of
+approximately $0.083 = 8.3 \%$.
+
+\item[Probability of queuing:]
+\[
+\varrho = P(\geq m \text{ jobs}) = \frac{(m*\rho)^m}{m! * (1 - \rho)}*p_0 =
+0.220 = 22.0 \%
+\]
+
+\item[Mean number of jobs in the system:]
+\[
+E[n] = m * \rho + \rho * \varrho /(1 - \rho) = 21.039
+\]
+
+\item[Variance of number of jobs in the system:]
+\[
+Var[n] = m * \rho + \rho * \varrho * \left[\frac{1 + \rho - \rho *
+\varrho}{(1 - \rho)^2} + m\right] = 242.363
+\]
+
+\item[Mean number of jobs in the queue:]
+\[
+E[n_q] = \rho * \varrho / (1-\rho) = 0.910
+\]
+
+\item[Variance of number of jobs in the queue:]
+\[
+Var[n_q] = \rho * \varrho * \left[\frac{1 + \rho - \rho *
+\varrho}{(1-\rho)^2}\right] = 7.605
+\]
+
+\item[Average utilization of each core (i.e. database connection):]
+\[
+U = \lambda/(m*\mu) = \rho = 0.805 = 80.5 \%
+\]
+
+\item[Mean response time:]
+\[
+E[r] = \frac{1}{\mu} * (1 + \frac{\varrho}{m * (1 - \rho)}) = 8.4 ms
+\]
+
+\item[Variance of the response time:]
+\[
+Var[r] = \frac{1}{\mu^2} * \left[1 + \frac{\varrho * (2 -
+\varrho)}{m^2*(1 - \rho)^2}\right] = 0.066 ms = 66 \mu s
+\]
+
+\item[Mean waiting time:]
+\[
+E[w] = E[n_q]/\lambda = \varrho / [m * \mu * (1 - \rho)] = 0.364 ms
+\]
+
+\item[Variance of waiting time:]
+\[
+Var[w] = \varrho * (2 - \varrho)/[m^2 * \mu^2 * (1 - \rho)^2] = 1.072 \mu s
+\]
+This implies, that most jobs have to wait no more than about $1.3 ms$. Details
+can be calculated using the $90-$ and $99-$percentile as below:
+
+\item[90-Percentile of the waiting time:]
+\[
+\frac{E[w]}{\varrho} * ln(10 * \varrho) = 0.0013 s = 1.3 ms
+\]
+
+\item[99-Percentile of the waiting time:]
+\[
+\frac{E[w]}{\varrho} * ln(100 * \varrho) = 0.0051 s = 5.1 ms
+\]
+This means only $1 \%$ of all jobs have to wait more than $5.1$ ms and $10 \%$
+more than $1.3$ ms.
+
+\end{description}
 
 
 
 \chapter{Conclusion}
+	\label{ch:conclusion}
+	
+\section{Limitations of MVA}
+
+\section{Model Parameter Values}
 	
 \section{Multiple Middlewares}
 \TODO{some text here to justify why this wasn't modeled and tested}
