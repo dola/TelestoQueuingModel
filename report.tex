@@ -147,10 +147,9 @@ ETH Z\"urich}
     characteristics of \telesto. It also includes explanations about
     simplifications and assumptions that were made.
 
-    \TODO{rewrite whole part}
-
     We recall Table 5.3 in \cite{asl:telesto}, showing in which parts of the
-    system a request spends how much time:
+    system a request spends how much time. \Cref{tbl:time-middleware} shows very
+    similar data (taken from an other experiment) and includes dispatching time. 
     
     \begin{table}[hp]
         \centering
@@ -171,24 +170,17 @@ ETH Z\"urich}
     
     Based on this data we can safely say, that the time a request is handled by
     the middleware is minimal in comparison to the time spent to actually handle
-    it on the database tier. Therefore, we can simplify the queuing model for
-    the middleware by reducing it to the database tier as seen in~\cref{fig:globalModel}.
+    it on the database tier. But still we know, that the tasks the worker
+    threads fullfil is also load dependent and should be modeled too.
     
-    Notice, that this leads to a very simplified model with one queue per
-    middleware and one service per database connection, since we can remove the
-    service time of the middleware interaction before and after the database
-    interaction. The database queues then become redundant and we can directly
-    link the queues of the middleware to all database connection services.
-    
-    Due to the architecture of \telesto, the database connection pool and the
-    worker thread pool are two entirely separated parts and therefore each
-    request handled by any worker thread, can be handled by any database connection out
-    of the pool.
+    \Cref{fig:globalModel} shows the network model of \telesto{} including all
+    important parts. As explained below, the clients themself are not modeled as
+    separate delay centers but directly influence the network think time $z$.
 
     \begin{figure}[t]
         \centering
-            \includegraphics[width=0.9\textwidth]{globalModel}
-            \caption{Simplified model of the closed queuing system for \telesto}
+            \includegraphics[width=0.9\textwidth]{model}
+            \caption{Network model of the closed queuing system for \telesto}
             \label{fig:globalModel}
     \end{figure}
 
@@ -203,7 +195,8 @@ ETH Z\"urich}
     It is important to note, that some clients may query the middleware to
     retrieve a message when actually no message is waiting for them. Based on
     the experiments from milestone 1, we know that this is the case for roughly
-    one sixth of all message requests.
+    one sixth of all message requests. Notice also, that the network is only a
+    delay center and therefore does not have a queue in the figure.
 
 \subsection{Clients}
     Our queuing network does not include any modeling of the clients. This is
@@ -223,7 +216,8 @@ ETH Z\"urich}
     message processing as seen in~\cref{tbl:time-middleware}, excluding the part
     where the middleware waits for the database. Since this takes very little time 
     compared to the time spent processing a job at the database, it is save to 
-    simplify the model by omitting the clients entirely.
+    simplify the model by not modeling the clients as separate load
+    centers.
     
     However the think time of the network can be determined by including the
     client retry delay of $100$ ms into the calculation. If we assume that (as
@@ -333,6 +327,8 @@ ETH Z\"urich}
     \end{description}
 
 \section{Parameters}
+\label{sc:parameters}
+
     Every device and the whole system modeled in the analytical queuing network
     for \telesto{} is specified by some parameters. These are (based
     on~\cite{jain2008art}):
@@ -532,7 +528,8 @@ executions of the real \telesto{} system in milestone 1. Refer to
     cannot simulate the descending throughput after a certain amount of clients
     are surpassed. (i.e. $100$ clients)
     
-    Again the starting points 
+    Again the starting points are already not fitting the real values which
+    itself produces a high offset.
     
     \newpage
     
@@ -549,6 +546,22 @@ executions of the real \telesto{} system in milestone 1. Refer to
     Since the network think time is directly dependent on the client retry delay
     in \telesto, we also simulated this experiment with our MVA model. The
     results are shown in \cref{fig:retry-delay}.
+    
+    As presented in \cref{sc:parameters}, the client retry delay directly
+    affects the think time of the modeled network. This can very nicely be seen
+    in this comparison because we actually get very similar data for our
+    simulation and the measurements from milestone 1. 
+    
+    Especially the retry delay in the interval of $75-100$ ms which leads to the
+    best performance, produces very similar results with an offset of less than
+    $7 \%$ and $3 \%$ for $75$ and $100$ ms respectively in throughput and less
+    than $6 \%$ and $11 \%$ in response time.
+    
+    An other observation is that the measured response time continues to
+    decrease with higher retry delay while the simulated one evens out at around
+    $10.7$ ms. This is most likely because the probability of having to wait
+    that long for a new message to be accessible is very low and doesn't behave
+    in such a linear manner as it was modeled in the network model.
     
     \newpage
 
@@ -726,18 +739,81 @@ more than $1.3$ ms.
 
 \end{description}
 
-
+As expected the utilization of the database with the selected input parameters
+is quite high while the waiting time is still rather low. We expect this to
+raise with increasing load. We also see a rather good correlation of the
+calculated values with the real ones, given that we had very limited modeling
+parameters.
 
 \chapter{Conclusion}
 	\label{ch:conclusion}
 	
-\section{Limitations of MVA}
-
-\section{Model Parameter Values}
+	Given that we only used the measured times of one execution of \telesto{} as
+    input for the whole network model and for simulation of completely different
+    configuration than those used during the reference measurement, the results
+    were pretty good.
+    
+    The following sections will show some limits of the simulations and list
+    some possible improvements.
 	
-\section{Multiple Middlewares}
-\TODO{some text here to justify why this wasn't modeled and tested}
+\section{Limitations of MVA}
+    First of all, it is very hard to model such a complex system with such a
+    simple model that basically only takes runtimes of separate components as
+    input. 
+    
+    Some factors like blocking, contention, mutual exclusion or
+    non-exponential service times can simply not be modeled with the limited MVA
+    model. 
+    
+    Then there is the problem of accurately selecting a $\mu$ function to
+    model the load dependent behaviour of the database and the workers. In case
+    of the workers, it is nearly irrelevant what is selected because they only
+    make a very small part of the entire response time. But with the database we
+    have a enormously complex software component that contains various
+    optimizations, does many unpredictable memory reads and is just to complex
+    as that if we could simply say it scales up to $25$ connections in parallel
+    but with $10 \%$ overhead.
+    
+    We at this point assume, that most of the difference between our simulation
+    data and the measured data is due to a too simplistic model of the database
+    behaviour. However it is not the scope of this work to improve that model.
+    
+    In the usual case one would first do some very limited measurement with the
+    system in order to have ground truth data for this model. There wouldn't be
+    the whole set of real data to compare to and therefore we wouldn't be able
+    to improve the model and change parameters in order to achieve a better fit.
+    This is exactly why we didn't do this because this is not the goal of this
+    simulation process.
+    
+    A second factor that impacts the correlation of our simulated data, is of
+    course the think time of the network. Our estimation is very vague and holds
+    only in a very small subset of the possible configurations. In order to
+    improve the predictability of this parameter, it would have been better to
+    only use \telesto{} tests with exactly one type of client and a guarantee of
+    always getting a message back together with a constant waiting time after
+    every response. This would lead to a predictable and balanced workload which
+    is free from fluctuations.
+ 
+    In the end we think the queuing network models as seen in
+    \cite{jain2008art}, are quite useful for approximate simulation of systems
+    that cannot be tested in real very easily. There is a big information source
+    in modeling a system like that if it isn't already built completely or if
+    further optimization options want to be explored without doing extensive
+    real world testing.
 
+\section{Multiple Middlewares}
+    This report does not include any simulation of \telesto{} with multiple
+    middlewares because it was relatively clear, that 
+    \begin{enumerate}
+        \item there wouldn't be any significant performance difference because
+        the database is the bottleneck
+        \item the model would get even more complicated with multiple
+        middlewares.
+    \end{enumerate}
+    
+    We therefore think that there is no real value in simulating this case and
+    omitted it for this report.
+    
 % This displays the bibliography for all cited external documents. All references have to be defined in the file references.bib and can then be cited from within this document.
 \bibliographystyle{splncs}
 \bibliography{references}
